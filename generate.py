@@ -283,21 +283,22 @@ def main():
   from time import time
   from numpy import array
 
-  steps = 20
+  steps = 1000
 
   noise = 0.0008
   stp_attract = 0.02
-  stp_reject = array([1,1,0.2],'float')*0.005
+  stp_reject = 0.005
+  #stp_reject = array([1,1,0.2],'float')*0.005
   nearl = 0.1
   farl = 4.0
 
   remesh_mode = 'SMOOTH'
-  remesh_scale = 0.65
+  remesh_scale = 0.7
   remesh_depth = 6
-  remesh_itt = 12
+  remesh_itt = 10
 
   obj_name = 'geom'
-  out_fn = 'a_res_ani'
+  out_fn = 'b'
 
   t1 = time()
 
@@ -316,10 +317,10 @@ def main():
     try:
       S.step()
       itt = S.itt
-      #if not itt%20:
-        #fnitt = './res/{:s}_{:05d}.blend'.format(out_fn,itt)
-        #S.save(fnitt)
-        #print(fnitt)
+      if not itt%20:
+        fnitt = './res/{:s}_{:05d}.blend'.format(out_fn,itt)
+        S.save(fnitt)
+        print(fnitt)
 
     except KeyboardInterrupt:
       print('KeyboardInterrupt')

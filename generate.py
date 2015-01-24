@@ -3,6 +3,15 @@
 import bpy
 import bmesh
 
+def timeit(method):
+  from time import time
+  def timed(*args, **kw):
+    ts = time()
+    result = method(*args, **kw)
+    te = time()
+    print('\t{:s} {:2.2f}'.format(method.__name__,te-ts))
+    return result
+  return timed
 
 class Surface(object):
 
@@ -12,6 +21,10 @@ class Surface(object):
                stp_reject,
                nearl,
                farl,
+               remesh_mode,
+               remesh_scale,
+               remesh_depth,
+               remesh_itt,
                obj_name='geom',
                nmax=10**6):
 
@@ -22,6 +35,11 @@ class Surface(object):
     self.stp_reject = stp_reject
     self.nearl = nearl
     self.farl = farl
+    self.remesh_mode = remesh_mode
+    self.remesh_scale = remesh_scale
+    self.remesh_depth = remesh_depth
+    self.remesh_itt = remesh_itt
+
     self.obj_name = obj_name
     self.nmax = nmax
 
@@ -87,8 +105,8 @@ class Surface(object):
     centroids = {}
 
     for i,f in face_vertices.items():
-      n = mean(row_stack([v.co for v in f]), axis=0)
-      centroids[i] = n
+      #centroids[i] = mean(row_stack([v.co for v in f]), axis=0)
+      centroids[i] = mean([v.co for v in f],axis=0)
 
     return centroids
 
@@ -97,7 +115,7 @@ class Surface(object):
     from numpy import roll, row_stack, all
 
     _,width = tri_simplex_vertex.shape
-    tri_edges = row_stack( [roll(tri_simplex_vertex,i) for i in range(width)] )[:,:2]
+    tri_edges = row_stack( [roll(tri_simplex_vertex,i)[:,:2] for i in range(width)] )
 
     mask = all(tri_edges>-1,axis=1)
     tri_edges = tri_edges[mask]
@@ -105,6 +123,7 @@ class Surface(object):
 
     return tri_edges
 
+  #@timeit
   def update_face_structure(self):
 
     from numpy import row_stack
@@ -112,7 +131,6 @@ class Surface(object):
     bm = self.__get_bmesh()
     self.bm = bm
 
-    # might not be correctly indexed
     vertices = row_stack([v.co for v in bm.verts])
     self.vertices = vertices
     self.vnum = len(vertices)
@@ -135,6 +153,7 @@ class Surface(object):
 
     return
 
+  #@timeit
   def balance(self):
 
     from numpy import zeros, reshape, sum
@@ -216,42 +235,69 @@ class Surface(object):
 
     return
 
-  def step(self):
-
-    self.itt += 1
-    self.update_face_structure()
-    self.vertex_noise()
-
-    self.balance()
+  def vertex_update(self):
 
     vertices = self.vertices
     for i,v in enumerate(self.bm.verts):
       v.co = vertices[i,:]
 
+    return
+
+  def remesh(self):
+
+    bpy.ops.object.modifier_add(type='REMESH')
+    self.obj.modifiers['Remesh'].mode = self.remesh_mode
+    self.obj.modifiers['Remesh'].scale = self.remesh_scale
+    self.obj.modifiers['Remesh'].octree_depth = self.remesh_depth
+    bpy.ops.object.modifier_apply(modifier='Remesh',apply_as='DATA')
+
+    return
+
+  #@timeit
+  def step(self):
+
+    from time import time
+
+    t1 = time()
+
+    self.itt += 1
+
+    self.update_face_structure()
+    self.vertex_noise()
+    t2 = time()
+    self.balance()
+    self.vertex_update()
     self.__to_mesh()
-    
-    if not self.itt%10:
-      bpy.ops.object.modifier_add(type='REMESH')
-      self.obj.modifiers['Remesh'].mode = 'SMOOTH'
-      self.obj.modifiers['Remesh'].scale = 0.7
-      self.obj.modifiers['Remesh'].octree_depth = 6
-      bpy.ops.object.modifier_apply(modifier='Remesh',apply_as='DATA')
+
+    if not self.itt%self.remesh_itt:
+      self.remesh()
+
+    t3 = time()
+
+    print(t3-t1, (t2-t1)/(t3-t1))
 
     return
 
 def main():
 
   from time import time
+  from numpy import array
 
-  steps = 50
+  steps = 20
 
   noise = 0.0008
   stp_attract = 0.02
-  stp_reject = 0.005
+  stp_reject = array([1,1,0.2],'float')*0.005
   nearl = 0.1
   farl = 4.0
+
+  remesh_mode = 'SMOOTH'
+  remesh_scale = 0.65
+  remesh_depth = 6
+  remesh_itt = 12
+
   obj_name = 'geom'
-  out_fn = 'res'
+  out_fn = 'a_res_ani'
 
   t1 = time()
 
@@ -260,16 +306,20 @@ def main():
              stp_reject=stp_reject,
              nearl=nearl,
              farl=farl,
+             remesh_mode=remesh_mode,
+             remesh_scale=remesh_scale,
+             remesh_depth=remesh_depth,
+             remesh_itt=remesh_itt,
              obj_name=obj_name)
 
   for i in range(steps):
     try:
       S.step()
       itt = S.itt
-      if not itt%10:
-        fnitt = './res/{:s}_{:05d}.blend'.format(out_fn,itt)
-        S.save(fnitt)
-        print(fnitt)
+      #if not itt%20:
+        #fnitt = './res/{:s}_{:05d}.blend'.format(out_fn,itt)
+        #S.save(fnitt)
+        #print(fnitt)
 
     except KeyboardInterrupt:
       print('KeyboardInterrupt')
@@ -285,5 +335,13 @@ def main():
 
 if __name__ == '__main__':
 
-  main()
+  if True:
+    import pstats
+    import cProfile
+    pfilename = 'profile.profile'
+    cProfile.run('main()',pfilename)
+    p = pstats.Stats(pfilename)
+    p.strip_dirs().sort_stats('cumulative').print_stats()
+  else:
+    main()
 

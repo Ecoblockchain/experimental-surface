@@ -1,5 +1,4 @@
-Experimental Surface
-=============
+# Experimental Surface
 
 This is a three dimensional implementation of the same ideas (more or less)
 that inspired the Differential algorithm
@@ -16,6 +15,12 @@ Run using:
 
 This uses `sphere.blend` as the seed. Note that the seed object must be named
 `geom`.
+
+## Requirements
+
+This script requires `Scipy` to be installed. (It uses `scipy.spatial.Delaunay`)
+
+### Example Result
 
 ![res](ex/res.png?raw=true "res")
 

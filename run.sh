@@ -20,7 +20,6 @@ base_mesh_name="$1"
 
 here=$(pwd)
 base="$here/$base_mesh_name"
-export_base="$here/export.py"
 generate="$here/generate.py"
 
 res_folder="$here/res/"

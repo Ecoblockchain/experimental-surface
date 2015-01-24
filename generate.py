@@ -258,23 +258,16 @@ class Surface(object):
 
     from time import time
 
-    t1 = time()
-
     self.itt += 1
 
     self.update_face_structure()
     self.vertex_noise()
-    t2 = time()
     self.balance()
     self.vertex_update()
     self.__to_mesh()
 
     if not self.itt%self.remesh_itt:
       self.remesh()
-
-    t3 = time()
-
-    print(t3-t1, (t2-t1)/(t3-t1))
 
     return
 

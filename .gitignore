@@ -5,3 +5,4 @@ res/*.blend*
 res/*
 modules/__*
 *.bak
+*.profile

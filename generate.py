@@ -54,6 +54,9 @@ class Surface(object):
     return
 
   def __delete_default(self):
+    '''
+    Removes default objects from the scene.
+    '''
 
     names = ['Cube', 'Icosphere', 'Sphere']
     for name in names:
@@ -72,6 +75,9 @@ class Surface(object):
     return
 
   def __get_bmesh(self):
+    '''
+    Convert the object to a bmesh.
+    '''
 
     bpy.data.objects[self.obj_name].select = True
     self.obj = bpy.context.active_object
@@ -81,12 +87,19 @@ class Surface(object):
     return bm
 
   def __to_mesh(self):
+    '''
+    Must be called to write the changes performed on bm from __get_bmesh to
+    persist.
+    '''
 
     bpy.ops.object.mode_set(mode='OBJECT')
 
     return
 
   def __triangulate(self,v):
+    '''
+    Performs triangulation on vertices in v ((n,3) array)
+    '''
 
     from scipy.spatial import Delaunay as delaunay
     flags = 'QJ Qc Pp'
@@ -95,10 +108,13 @@ class Surface(object):
                    incremental=False,
                    qhull_options=flags)
 
-    simplex_vertex = tri.simplices
-    return simplex_vertex
+    return tri
 
-  def __get_face_centroids(self,vertices,face_vertices):
+  def __get_face_centroids(self,face_vertices):
+    '''
+    Returns alle centroids of faces (list of list of bmesh.verts) in
+    face_vertices
+    '''
 
     from numpy import mean, row_stack
 
@@ -109,22 +125,35 @@ class Surface(object):
       centroids[i] = mean([v.co for v in f],axis=0)
 
     return centroids
+  
+  @timeit
+  def __get_tri_edges(self,tri):
+    '''
+    Get all unique internal edges (vertex-vertex pairs) of delaunay
+    triangulation tri.
+    '''
 
-  def __get_tri_edges(self,tri_simplex_vertex):
+    from numpy import roll, row_stack, all, transpose, tile, sort, column_stack, arange
+    from collections import defaultdict
 
-    from numpy import roll, row_stack, all
+    indices,indptr = tri.vertex_neighbor_vertices
+    edges = []
+    for i,a,b in column_stack((arange(len(indices)-1),
+                               indices[:-1],indices[1:])):
+      edges.append(sort(transpose((tile(i,b-a),indptr[a:b])),axis=1))
 
-    _,width = tri_simplex_vertex.shape
-    tri_edges = row_stack( [roll(tri_simplex_vertex,i)[:,:2] for i in range(width)] )
+    stacked = row_stack(edges)
+    mask = all(stacked>-1,axis=1)
+    stacked = stacked[mask]
+    final = row_stack(set((tuple(sorted(e)) for e in stacked)))
 
-    mask = all(tri_edges>-1,axis=1)
-    tri_edges = tri_edges[mask]
-    tri_edges = row_stack(set((tuple(e) for e in tri_edges)))
+    return final
 
-    return tri_edges
-
-  #@timeit
+  @timeit
   def update_face_structure(self):
+    '''
+    Constructs the necessary data structures
+    '''
 
     from numpy import row_stack
 
@@ -142,19 +171,26 @@ class Surface(object):
     self.face_vertex_indices = face_vertex_indices
 
     edges = list(bm.edges)
-    self.edges = edges #print(list(e.link_faces))
+    self.edges = edges
 
-    face_centroids = self.__get_face_centroids(vertices,face_vertices)
+    face_centroids = self.__get_face_centroids(face_vertices)
     self.face_centroids = face_centroids
 
-    tri_simplex_vertex = self.__triangulate(row_stack([f for i,f in self.face_centroids.items()]))
-    tri_edges = self.__get_tri_edges(tri_simplex_vertex) #
+    tri_verts = row_stack([f for i,f in self.face_centroids.items()])
+    tri = self.__triangulate(tri_verts)
+    tri_edges = self.__get_tri_edges(tri) #
     self.tri_edges = tri_edges
 
     return
 
-  #@timeit
+  @timeit
   def balance(self):
+    '''
+    Performs growth step. Neighboring faces are pulled towards each other,
+    unless they are closer than `self.nearl`, and faces that are connected via
+    a Delaunay triangulation of the face centroids are pushed apart if they are
+    within `self.farl` of each other.
+    '''
 
     from numpy import zeros, reshape, sum
     from numpy.linalg import norm
@@ -220,7 +256,11 @@ class Surface(object):
 
     return
 
+  #@timeit
   def vertex_noise(self):
+    '''
+    Randomly move the vertices around a little.
+    '''
 
     from numpy.random import multivariate_normal
     from numpy.linalg import norm
@@ -236,6 +276,9 @@ class Surface(object):
     return
 
   def vertex_update(self):
+    '''
+    Write everything back to the mesh
+    '''
 
     vertices = self.vertices
     for i,v in enumerate(self.bm.verts):
@@ -244,6 +287,9 @@ class Surface(object):
     return
 
   def remesh(self):
+    '''
+    Uses blender Remesh modifier to reconstruct the mesh.
+    '''
 
     bpy.ops.object.modifier_add(type='REMESH')
     self.obj.modifiers['Remesh'].mode = self.remesh_mode
@@ -253,8 +299,11 @@ class Surface(object):
 
     return
 
-  #@timeit
+  @timeit
   def step(self):
+    '''
+    Do all the things.
+    '''
 
     from time import time
 
@@ -278,20 +327,20 @@ def main():
 
   steps = 1000
 
-  noise = 0.0008
-  stp_attract = 0.02
-  stp_reject = 0.005
+  noise = 0.0008 # 0.0008
+  stp_attract = 0.05
+  stp_reject = 0.01 #0.01
   #stp_reject = array([1,1,0.2],'float')*0.005
   nearl = 0.1
-  farl = 4.0
+  farl = 5.0
 
   remesh_mode = 'SMOOTH'
-  remesh_scale = 0.7
+  remesh_scale = 0.6
   remesh_depth = 6
-  remesh_itt = 10
+  remesh_itt = 15
 
   obj_name = 'geom'
-  out_fn = 'b'
+  out_fn = 'c'
 
   t1 = time()
 
@@ -313,12 +362,11 @@ def main():
       if not itt%20:
         fnitt = './res/{:s}_{:05d}.blend'.format(out_fn,itt)
         S.save(fnitt)
-        print(fnitt)
+        print(fnitt, S.vertices.shape)
 
     except KeyboardInterrupt:
       print('KeyboardInterrupt')
       break
-
 
   S.save('./res/{:s}.blend'.format(out_fn))
 
@@ -329,7 +377,7 @@ def main():
 
 if __name__ == '__main__':
 
-  if True:
+  if False:
     import pstats
     import cProfile
     pfilename = 'profile.profile'

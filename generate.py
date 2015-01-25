@@ -195,12 +195,9 @@ class Surface(object):
     within `self.farl` of each other.
     '''
 
-    from time import time
     from numpy import zeros, reshape, sum
     from numpy.linalg import norm
     from numpy import array, row_stack, diff, zeros, logical_and
-
-    t1 = time()
 
     nearl = self.nearl
     farl = self.farl
@@ -218,7 +215,7 @@ class Surface(object):
     dx_reject = zeros((nmax,3),'float')
 
 
-    ## attract 20%
+    ## attract
     for edge in edges:
       try:
         f1,f2 = edge.link_faces
@@ -237,7 +234,6 @@ class Surface(object):
         pass
 
     inds = array(list(face_centroids.keys()),'int')
-
     if any(diff(inds)!=1):
       '''
       this is slow code.
@@ -281,21 +277,20 @@ class Surface(object):
         dx_reject[a,:] -= f
         dx_reject[b,:] += f
 
+
     dx_attract *= self.stp_attract
     dx_reject *= self.stp_reject
-    dx = dx_attract + dx_reject
 
-    t2 = time()
+    #self.print_force_info(dx_reject,dx_attract)
+
+    dx = dx_attract + dx_reject
 
     for i,jj in face_vertex_indices.items():
       vertices[jj,:] += dx[i,:]
 
-    t3 = time()
-    print(t3-t1,(t2-t1)/(t3-t1))
-
     return
 
-  def print_force_info(dx_reject,dx_attract):
+  def print_force_info(self,dx_reject,dx_attract):
 
     from numpy.linalg import norm
     from numpy import abs
@@ -304,7 +299,9 @@ class Surface(object):
     asum = norm(abs(dx_attract),axis=0)
     rstr = 'reject: {:4.4f} {:4.4f} {:4.4f}'.format(*rsum)
     astr = 'attract: {:4.4f} {:4.4f} {:4.4f}'.format(*asum)
-    print(rstr,astr)
+    print(rstr)
+    print(astr)
+    print()
 
     return
 
@@ -343,6 +340,11 @@ class Surface(object):
     Uses blender Remesh modifier to reconstruct the mesh.
     '''
 
+    bpy.ops.object.modifier_add(type='SMOOTH')
+    self.obj.modifiers['Smooth'].factor = 0.2
+    self.obj.modifiers['Smooth'].iterations = 2
+    bpy.ops.object.modifier_apply(modifier='Smooth',apply_as='DATA')
+
     bpy.ops.object.modifier_add(type='REMESH')
     self.obj.modifiers['Remesh'].mode = self.remesh_mode
     self.obj.modifiers['Remesh'].scale = self.remesh_scale
@@ -351,7 +353,7 @@ class Surface(object):
 
     return
 
-  @timeit
+  #@timeit
   def step(self):
     '''
     Do all the things.
@@ -362,7 +364,7 @@ class Surface(object):
     self.itt += 1
 
     self.update_face_structure()
-    self.vertex_noise()
+    #self.vertex_noise()
     self.balance()
     self.vertex_update()
     self.__to_mesh()
@@ -379,10 +381,10 @@ def main():
 
   steps = 1000
 
-  noise = 0.0008 # 0.0008
-  stp_attract = 0.05
+  noise = 0.08 # 0.0008
+  stp_attract = 0.08 #0.05
   stp_reject = 0.01 #0.01
-  #stp_reject = array([1,1,0.2],'float')*0.005
+  #stp_reject = array([1,1,0.3],'float')*0.1
   nearl = 0.1
   farl = 5.0
 
@@ -411,10 +413,14 @@ def main():
     try:
       S.step()
       itt = S.itt
-      if not itt%20:
+
+      if not itt%5:
+        print(itt,S.vertices.shape)
+
+      if not itt%15:
         fnitt = './res/{:s}_{:05d}.blend'.format(out_fn,itt)
         S.save(fnitt)
-        print(fnitt, S.vertices.shape)
+        print(fnitt)
 
     except KeyboardInterrupt:
       print('KeyboardInterrupt')

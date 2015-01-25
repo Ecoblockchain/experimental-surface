@@ -126,7 +126,7 @@ class Surface(object):
 
     return centroids
   
-  @timeit
+  #@timeit
   def __get_tri_edges(self,tri):
     '''
     Get all unique internal edges (vertex-vertex pairs) of delaunay
@@ -149,13 +149,15 @@ class Surface(object):
 
     return final
 
-  @timeit
+  #@timeit
   def update_face_structure(self):
     '''
     Constructs the necessary data structures
     '''
 
     from numpy import row_stack
+    from time import time
+
 
     bm = self.__get_bmesh()
     self.bm = bm
@@ -178,12 +180,13 @@ class Surface(object):
 
     tri_verts = row_stack([f for i,f in self.face_centroids.items()])
     tri = self.__triangulate(tri_verts)
-    tri_edges = self.__get_tri_edges(tri) #
+
+    tri_edges = self.__get_tri_edges(tri) # slow
     self.tri_edges = tri_edges
 
     return
 
-  @timeit
+  #@timeit
   def balance(self):
     '''
     Performs growth step. Neighboring faces are pulled towards each other,
@@ -192,8 +195,12 @@ class Surface(object):
     within `self.farl` of each other.
     '''
 
+    from time import time
     from numpy import zeros, reshape, sum
     from numpy.linalg import norm
+    from numpy import array, row_stack, diff, zeros, logical_and
+
+    t1 = time()
 
     nearl = self.nearl
     farl = self.farl
@@ -210,7 +217,8 @@ class Surface(object):
     dx_attract = zeros((nmax,3),'float')
     dx_reject = zeros((nmax,3),'float')
 
-    ## attract
+
+    ## attract 20%
     for edge in edges:
       try:
         f1,f2 = edge.link_faces
@@ -228,31 +236,75 @@ class Surface(object):
       except Exception:
         pass
 
-    # reject
-    ## TODO: vectorize
-    for a,b in tri_edges:
-      v1 = face_centroids[a]
-      v2 = face_centroids[b]
-      vdx = v2-v1
-      nrm = norm(vdx)
+    inds = array(list(face_centroids.keys()),'int')
 
-      if nrm<farl:
-        force = (farl/nrm-1.)*vdx
-        dx_reject[a,:] -= force
-        dx_reject[b,:] += force
+    if any(diff(inds)!=1):
+      '''
+      this is slow code.
+
+      below we assume that the indices of faces in face_vertex_indices are
+      ordered and have no gaps. this is not a very good assumption in general,
+      but it has worked here so far.
+      
+      If this assumption does not hold we fall back to this slower code
+
+      Should rewrite the data structures/code to avoid having this check.
+      '''
+
+      for a,b in tri_edges:
+        v1 = face_centroids[a]
+        v2 = face_centroids[b]
+        vdx = v2-v1
+        nrm = norm(vdx)
+
+        if nrm<farl:
+          force = (farl/nrm-1.)*vdx
+          dx_reject[a,:] -= force
+          dx_reject[b,:] += force
+
+      print('warning: falling back to for-loop.')
+
+    else:
+      ## use faster code:
+      # TODO: rewrite. see above.
+
+      face_centroids_padded_array = zeros((max(inds)+1,3),'float')
+      stacked = row_stack(face_centroids.values())
+      face_centroids_padded_array[inds,:] = stacked
+      vvdx = diff(face_centroids_padded_array[tri_edges,:],axis=1).squeeze()
+      nrm = norm(vvdx,axis=1)
+
+      mask = logical_and(nrm<farl,nrm>0.)
+      force = (farl/reshape(nrm[mask],(-1,1))-1.)*vvdx[mask,:]
+
+      for (a,b),f in zip(tri_edges[mask,:],force):
+        dx_reject[a,:] -= f
+        dx_reject[b,:] += f
 
     dx_attract *= self.stp_attract
     dx_reject *= self.stp_reject
     dx = dx_attract + dx_reject
 
-    #rsum = norm(abs(dx_reject),axis=0)
-    #asum = norm(abs(dx_attract),axis=0)
-    #rstr = 'reject: {:4.4f} {:4.4f} {:4.4f}'.format(*rsum)
-    #astr = 'attract: {:4.4f} {:4.4f} {:4.4f}'.format(*asum)
-    #print(rstr,astr)
+    t2 = time()
 
     for i,jj in face_vertex_indices.items():
       vertices[jj,:] += dx[i,:]
+
+    t3 = time()
+    print(t3-t1,(t2-t1)/(t3-t1))
+
+    return
+
+  def print_force_info(dx_reject,dx_attract):
+
+    from numpy.linalg import norm
+    from numpy import abs
+
+    rsum = norm(abs(dx_reject),axis=0)
+    asum = norm(abs(dx_attract),axis=0)
+    rstr = 'reject: {:4.4f} {:4.4f} {:4.4f}'.format(*rsum)
+    astr = 'attract: {:4.4f} {:4.4f} {:4.4f}'.format(*asum)
+    print(rstr,astr)
 
     return
 

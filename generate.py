@@ -110,22 +110,6 @@ class Surface(object):
 
     return tri
 
-  def __get_face_centroids(self,face_vertices):
-    '''
-    Returns alle centroids of faces (list of list of bmesh.verts) in
-    face_vertices
-    '''
-
-    from numpy import mean, row_stack
-
-    centroids = {}
-
-    for i,f in face_vertices.items():
-      #centroids[i] = mean(row_stack([v.co for v in f]), axis=0)
-      centroids[i] = mean([v.co for v in f],axis=0)
-
-    return centroids
-  
   #@timeit
   def __get_tri_edges(self,tri):
     '''
@@ -133,8 +117,8 @@ class Surface(object):
     triangulation tri.
     '''
 
-    from numpy import roll, row_stack, all, transpose, tile, sort, column_stack, arange
-    from collections import defaultdict
+    from numpy import row_stack, all, transpose, tile, sort,\
+      column_stack, arange
 
     indices,indptr = tri.vertex_neighbor_vertices
     edges = []
@@ -155,9 +139,7 @@ class Surface(object):
     Constructs the necessary data structures
     '''
 
-    from numpy import row_stack
-    from time import time
-
+    from numpy import row_stack, array, diff
 
     bm = self.__get_bmesh()
     self.bm = bm
@@ -166,20 +148,28 @@ class Surface(object):
     self.vertices = vertices
     self.vnum = len(vertices)
 
-    faces = [f for f in bm.faces]
-    face_vertex_indices = {f.index:[v.index for v in f.verts] for f in faces}
-    face_vertices = {f.index:list(f.verts) for f in faces}
-    self.face_vertices = face_vertices
+    faces = list(f for f in bm.faces)
+    faces_indices = array([f.index for f in faces],'int')
+    self.faces_indices = faces_indices
+    if any(diff(faces_indices)!=1):
+      '''
+      in the rest of the code assume that the indices of faces in
+      faces_indics are ordered and have no gaps. this is not a very good
+      assumption in general, but it has worked here so far.
+      '''
+      #TODO: Should rewrite the data structures/code to avoid this
+      raise AssertionError('there is a gap in the indices of bm.faces.')
+
+    face_vertex_indices = [[v.index for v in f.verts] for f in faces]
     self.face_vertex_indices = face_vertex_indices
 
     edges = list(bm.edges)
     self.edges = edges
 
-    face_centroids = self.__get_face_centroids(face_vertices)
+    face_centroids = row_stack([f.calc_center_bounds() for f in faces])
     self.face_centroids = face_centroids
 
-    tri_verts = row_stack([f for i,f in self.face_centroids.items()])
-    tri = self.__triangulate(tri_verts)
+    tri = self.__triangulate(face_centroids)
 
     tri_edges = self.__get_tri_edges(tri) # slow
     self.tri_edges = tri_edges
@@ -195,25 +185,21 @@ class Surface(object):
     within `self.farl` of each other.
     '''
 
-    from numpy import zeros, reshape, sum
+    from numpy import zeros, reshape, diff, logical_and
     from numpy.linalg import norm
-    from numpy import array, row_stack, diff, zeros, logical_and
 
     nearl = self.nearl
     farl = self.farl
 
     vertices = self.vertices
-    face_vertices = self.face_vertices
     face_vertex_indices = self.face_vertex_indices
     face_centroids = self.face_centroids
     tri_edges = self.tri_edges
     edges = self.edges
-    vnum = self.vnum
     nmax = self.nmax
 
     dx_attract = zeros((nmax,3),'float')
     dx_reject = zeros((nmax,3),'float')
-
 
     ## attract
     for edge in edges:
@@ -233,49 +219,15 @@ class Surface(object):
       except Exception:
         pass
 
-    inds = array(list(face_centroids.keys()),'int')
-    if any(diff(inds)!=1):
-      '''
-      this is slow code.
+    vvdx = diff(self.face_centroids[tri_edges,:],axis=1).squeeze()
+    nrm = norm(vvdx,axis=1)
 
-      below we assume that the indices of faces in face_vertex_indices are
-      ordered and have no gaps. this is not a very good assumption in general,
-      but it has worked here so far.
-      
-      If this assumption does not hold we fall back to this slower code
+    mask = logical_and(nrm<farl,nrm>0.)
+    force = (farl/reshape(nrm[mask],(-1,1))-1.)*vvdx[mask,:]
 
-      Should rewrite the data structures/code to avoid having this check.
-      '''
-
-      for a,b in tri_edges:
-        v1 = face_centroids[a]
-        v2 = face_centroids[b]
-        vdx = v2-v1
-        nrm = norm(vdx)
-
-        if nrm<farl:
-          force = (farl/nrm-1.)*vdx
-          dx_reject[a,:] -= force
-          dx_reject[b,:] += force
-
-      print('warning: falling back to for-loop.')
-
-    else:
-      ## use faster code:
-      # TODO: rewrite. see above.
-
-      face_centroids_padded_array = zeros((max(inds)+1,3),'float')
-      stacked = row_stack(face_centroids.values())
-      face_centroids_padded_array[inds,:] = stacked
-      vvdx = diff(face_centroids_padded_array[tri_edges,:],axis=1).squeeze()
-      nrm = norm(vvdx,axis=1)
-
-      mask = logical_and(nrm<farl,nrm>0.)
-      force = (farl/reshape(nrm[mask],(-1,1))-1.)*vvdx[mask,:]
-
-      for (a,b),f in zip(tri_edges[mask,:],force):
-        dx_reject[a,:] -= f
-        dx_reject[b,:] += f
+    for (a,b),f in zip(tri_edges[mask,:],force):
+      dx_reject[a,:] -= f
+      dx_reject[b,:] += f
 
 
     dx_attract *= self.stp_attract
@@ -285,7 +237,7 @@ class Surface(object):
 
     dx = dx_attract + dx_reject
 
-    for i,jj in face_vertex_indices.items():
+    for i,jj in enumerate(face_vertex_indices):
       vertices[jj,:] += dx[i,:]
 
     return
@@ -359,8 +311,6 @@ class Surface(object):
     Do all the things.
     '''
 
-    from time import time
-
     self.itt += 1
 
     self.update_face_structure()
@@ -377,7 +327,6 @@ class Surface(object):
 def main():
 
   from time import time
-  from numpy import array
 
   steps = 1000
 

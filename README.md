@@ -24,6 +24,8 @@ This script requires `Scipy` to be installed. (It uses `scipy.spatial.Delaunay`)
 
 ![res](ex/res.png?raw=true "res")
 
+![res1](ex/res1.png?raw=true "res1")
+
 -----------
 http://inconvergent.net
 

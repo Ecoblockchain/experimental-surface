@@ -140,9 +140,13 @@ class Surface(object):
     '''
 
     from numpy import row_stack, array, diff
+    from numpy.random import randint
+
+
 
     bm = self.__get_bmesh()
     self.bm = bm
+
 
     vertices = row_stack([v.co for v in bm.verts])
     self.vertices = vertices
@@ -160,8 +164,14 @@ class Surface(object):
       #TODO: Should rewrite the data structures/code to avoid this
       raise AssertionError('there is a gap in the indices of bm.faces.')
 
+
     face_vertex_indices = [[v.index for v in f.verts] for f in faces]
     self.face_vertex_indices = face_vertex_indices
+
+    #rnd = randint(0,high=len(self.obj.data.polygons))
+    #print(face_vertex_indices[rnd])
+    #print(list(self.obj.data.polygons[rnd].vertices))
+    #print()
 
     edges = list(bm.edges)
     self.edges = edges
@@ -198,8 +208,10 @@ class Surface(object):
     edges = self.edges
     nmax = self.nmax
 
-    dx_attract = zeros((nmax,3),'float')
-    dx_reject = zeros((nmax,3),'float')
+    fnum = len(face_centroids)
+
+    dx_attract = zeros((fnum,3),'float')
+    dx_reject = zeros((fnum,3),'float')
 
     ## attract
     for edge in edges:
@@ -229,30 +241,32 @@ class Surface(object):
       dx_reject[a,:] -= f
       dx_reject[b,:] += f
 
-
     dx_attract *= self.stp_attract
     dx_reject *= self.stp_reject
 
-    #self.print_force_info(dx_reject,dx_attract)
-
     dx = dx_attract + dx_reject
 
-    for i,jj in enumerate(face_vertex_indices):
-      vertices[jj,:] += dx[i,:]
+    self.print_force_info(dx_reject,dx_attract, dx)
 
-    return
+    return dx
 
-  def print_force_info(self,dx_reject,dx_attract):
+  def print_force_info(self,dx_reject,dx_attract,dx):
 
     from numpy.linalg import norm
     from numpy import abs
 
     rsum = norm(abs(dx_reject),axis=0)
     asum = norm(abs(dx_attract),axis=0)
-    rstr = 'reject: {:4.4f} {:4.4f} {:4.4f}'.format(*rsum)
-    astr = 'attract: {:4.4f} {:4.4f} {:4.4f}'.format(*asum)
+    dsum = norm(abs(dx),axis=0)
+    rstr = 'reject:  max: {:4.4f} * {:4.4f} {:4.4f} {:4.4f}'\
+        .format(abs(dx_reject).max(),*rsum)
+    astr = 'attract: max: {:4.4f} * {:4.4f} {:4.4f} {:4.4f}'\
+        .format(abs(dx_attract).max(),*asum)
+    dstr = 'dx: max: {:4.4f} * {:4.4f} {:4.4f} {:4.4f}'\
+        .format(abs(dx).max(),*dsum)
     print(rstr)
     print(astr)
+    print(dstr)
     print()
 
     return
@@ -273,6 +287,37 @@ class Surface(object):
     x /= l
 
     self.vertices += x*self.noise
+
+    return
+
+  def light_react(self,dx):
+
+    from numpy import zeros, logical_not, ones
+
+    light_source = [0,0,200]
+    vertices = self.vertices
+    face_vertex_indices = self.face_vertex_indices
+
+    #stp = [0,0,0.1]
+
+    facemap = zeros(len(face_vertex_indices),'bool')
+
+    #for i,c in enumerate(self.face_centroids):
+      #result,obj,mat,loc,norm = bpy.context.scene.ray_cast(light_source,c)
+      ##print(result,obj,norm)
+      #if not result:
+        ##vertices[face_vertex_indices[i],:] += stp
+        #vertmap[face_vertex_indices[i]] = True
+
+    #dx[logical_not(vertmap),:] = 0
+
+    for i,c in enumerate(self.face_centroids):
+      result,obj,mat,loc,norm = bpy.context.scene.ray_cast(light_source,c)
+      #print(result,obj,norm)
+      if result:
+        facemap[i] = True
+
+    dx[facemap,:] *= 0.1
 
     return
 
@@ -314,8 +359,13 @@ class Surface(object):
     self.itt += 1
 
     self.update_face_structure()
-    #self.vertex_noise()
-    self.balance()
+    self.vertex_noise()
+    dx = self.balance()
+    self.light_react(dx)
+
+    for i,jj in enumerate(self.face_vertex_indices):
+      self.vertices[jj,:] += dx[i,:]
+
     self.vertex_update()
     self.__to_mesh()
 

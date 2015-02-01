@@ -285,6 +285,30 @@ class Surface(object):
 
     return
 
+  def curvature_scale(self,dx):
+
+    from numpy import dot, zeros, reshape, abs
+
+    edges = self.edges
+    facescale = zeros(len(dx),'float')
+    face_normals = self.face_normals
+
+    for edge in edges:
+      try:
+        f1,f2 = edge.link_faces
+        i1 = f1.index
+        i2 = f2.index
+        d = abs(dot(face_normals[i1],face_normals[i2]))
+        facescale[i1] += d
+        facescale[i2] += d
+      except Exception:
+        pass
+
+    facescale /= facescale.max()
+    dx *= 1.-reshape(facescale,(-1,1))
+
+    return
+
   def light_react(self,dx):
 
     from numpy import zeros, logical_not, ones, dot, array, abs, reshape
@@ -295,14 +319,13 @@ class Surface(object):
     face_vertex_indices = self.face_vertex_indices
     face_normals = self.face_normals
 
-    facemap = zeros(len(face_vertex_indices),'bool')
-    facescale = zeros(len(face_vertex_indices),'float')
+    facemap = zeros(len(dx),'bool')
+    facescale = zeros(len(dx),'float')
 
     for i,c in enumerate(self.face_centroids):
       result,obj,mat,loc,normal = bpy.context.scene.ray_cast(light_source,c)
       if result:
         facemap[i] = True
-
       else:
         diff = (light_source-c)
         diff /= norm(diff)
@@ -356,7 +379,9 @@ class Surface(object):
     self.update_data_structure()
     self.vertex_noise()
     dx = self.balance()
+
     #self.light_react(dx)
+    self.curvature_scale(dx)
 
     for i,jj in enumerate(self.face_vertex_indices):
       self.vertices[jj,:] += dx[i,:]
@@ -380,7 +405,7 @@ def main():
   stp_reject = 0.01 #0.01
   #stp_reject = array([1,1,0.3],'float')*0.1
   nearl = 0.1
-  farl = 5.0
+  farl = 10.0
 
   remesh_mode = 'SMOOTH'
   remesh_scale = 0.6
@@ -409,7 +434,7 @@ def main():
       itt = S.itt
 
       if not itt%5:
-        print(itt,S.vertices.shape)
+        print(itt,'vertices:',len(S.vertices),'faces:',len(S.face_centroids))
 
       if not itt%15:
         fnitt = './res/{:s}_{:05d}.blend'.format(out_fn,itt)

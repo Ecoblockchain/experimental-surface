@@ -134,7 +134,7 @@ class Surface(object):
     return final
 
   #@timeit
-  def update_face_structure(self):
+  def update_data_structure(self):
     '''
     Constructs the necessary data structures
     '''
@@ -143,10 +143,8 @@ class Surface(object):
     from numpy.random import randint
 
 
-
     bm = self.__get_bmesh()
     self.bm = bm
-
 
     vertices = row_stack([v.co for v in bm.verts])
     self.vertices = vertices
@@ -164,17 +162,14 @@ class Surface(object):
       #TODO: Should rewrite the data structures/code to avoid this
       raise AssertionError('there is a gap in the indices of bm.faces.')
 
-
     face_vertex_indices = [[v.index for v in f.verts] for f in faces]
     self.face_vertex_indices = face_vertex_indices
 
-    #rnd = randint(0,high=len(self.obj.data.polygons))
-    #print(face_vertex_indices[rnd])
-    #print(list(self.obj.data.polygons[rnd].vertices))
-    #print()
-
     edges = list(bm.edges)
     self.edges = edges
+
+    face_normals = row_stack([f.normal for f in faces])
+    self.face_normals = face_normals
 
     face_centroids = row_stack([f.calc_center_bounds() for f in faces])
     self.face_centroids = face_centroids
@@ -292,32 +287,32 @@ class Surface(object):
 
   def light_react(self,dx):
 
-    from numpy import zeros, logical_not, ones
+    from numpy import zeros, logical_not, ones, dot, array, abs, reshape
+    from numpy.linalg import norm
 
-    light_source = [0,0,200]
+    light_source = array([0,0,200],'float')
     vertices = self.vertices
     face_vertex_indices = self.face_vertex_indices
-
-    #stp = [0,0,0.1]
+    face_normals = self.face_normals
 
     facemap = zeros(len(face_vertex_indices),'bool')
-
-    #for i,c in enumerate(self.face_centroids):
-      #result,obj,mat,loc,norm = bpy.context.scene.ray_cast(light_source,c)
-      ##print(result,obj,norm)
-      #if not result:
-        ##vertices[face_vertex_indices[i],:] += stp
-        #vertmap[face_vertex_indices[i]] = True
-
-    #dx[logical_not(vertmap),:] = 0
+    facescale = zeros(len(face_vertex_indices),'float')
 
     for i,c in enumerate(self.face_centroids):
-      result,obj,mat,loc,norm = bpy.context.scene.ray_cast(light_source,c)
-      #print(result,obj,norm)
+      result,obj,mat,loc,normal = bpy.context.scene.ray_cast(light_source,c)
       if result:
         facemap[i] = True
 
-    dx[facemap,:] *= 0.1
+      else:
+        diff = (light_source-c)
+        diff /= norm(diff)
+        scale = abs(dot(diff,face_normals[i,:]))
+        facescale[i] = scale
+
+    facescale /= facescale.max()
+    facescale[facescale<0.1] = 0.1
+
+    dx *= reshape(facescale,(-1,1))
 
     return
 
@@ -358,10 +353,10 @@ class Surface(object):
 
     self.itt += 1
 
-    self.update_face_structure()
+    self.update_data_structure()
     self.vertex_noise()
     dx = self.balance()
-    self.light_react(dx)
+    #self.light_react(dx)
 
     for i,jj in enumerate(self.face_vertex_indices):
       self.vertices[jj,:] += dx[i,:]
